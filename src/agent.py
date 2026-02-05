@@ -11,8 +11,10 @@ from livekit.agents import (
     cli,
     inference,
     room_io,
+    function_tool,
+    RunContext,
 )
-from livekit.plugins import noise_cancellation, silero
+from livekit.plugins import noise_cancellation, silero, xai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 logger = logging.getLogger("agent")
@@ -23,10 +25,16 @@ load_dotenv(".env.local")
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
-            instructions="""You are a helpful voice AI assistant. The user is interacting with you via voice, even if you perceive the conversation as text.
-            You eagerly assist users with their questions by providing information from your extensive knowledge.
-            Your responses are concise, to the point, and without any complex formatting or punctuation including emojis, asterisks, or other symbols.
-            You are curious, friendly, and have a sense of humor.""",
+            instructions="""You are Grok, a maximally truthful and helpful AI built by xAI.
+            You respond naturally in voice conversations.
+            Be concise, witty when it fits, and avoid unnecessary formatting, emojis, or symbols.
+            Answer questions directly using your knowledge and reasoning.""",
+            llm=xai.realtime.RealtimeModel(voice="ara"),
+            tools=[
+                xai.realtime.XSearch(),         # search X (Twitter) in realtime
+                xai.realtime.WebSearch(),       # general web search
+                # your own @function_tool decorated methods here
+            ],
         )
 
     # To add tools, use the @function_tool decorator.
@@ -69,18 +77,29 @@ async def my_agent(ctx: JobContext):
     session = AgentSession(
         # Speech-to-text (STT) is your agent's ears, turning the user's speech into text that the LLM can understand
         # See all available models at https://docs.livekit.io/agents/models/stt/
-        stt=inference.STT(model="deepgram/nova-3", language="multi"),
+        #stt=inference.STT(model="deepgram/nova-3", language="multi"),
         # A Large Language Model (LLM) is your agent's brain, processing user input and generating a response
         # See all available models at https://docs.livekit.io/agents/models/llm/
-        llm=inference.LLM(model="openai/gpt-4.1-mini"),
+        #llm=inference.LLM(model="openai/gpt-4.1-mini"),
+        llm=xai.realtime.RealtimeModel(
+            voice="ara",                # default voice; "ara", others listed
+            # Optional: custom turn detection (server VAD is used by default)
+            # turn_detection=None,            # to disable built-in turn detection
+            # or customize:
+            # turn_detection=turn_detection.ServerVad(
+            #     threshold=0.5,
+            #     silence_duration_ms=250,
+            #     prefix_padding_ms=300,
+            # ),
+        ),
         # Text-to-speech (TTS) is your agent's voice, turning the LLM's text into speech that the user can hear
         # See all available models as well as voice selections at https://docs.livekit.io/agents/models/tts/
-        tts=inference.TTS(
-            model="cartesia/sonic-3", voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
-        ),
+        #tts=inference.TTS(
+        #    model="cartesia/sonic-3", voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
+        #),
         # VAD and turn detection are used to determine when the user is speaking and when the agent should respond
         # See more at https://docs.livekit.io/agents/build/turns
-        turn_detection=MultilingualModel(),
+        #turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         # allow the LLM to generate a response while waiting for the end of turn
         # See more at https://docs.livekit.io/agents/build/audio/#preemptive-generation
