@@ -140,6 +140,20 @@ async def my_agent(ctx: JobContext):
         ),
     )
 
+    # greeting immédiat pour les appels entrants (Twilio/SIP)
+    # On utilise generate_reply avec des instructions pour que Grok génère un bonjour naturel
+    await session.generate_reply(
+    #    #instructions="Greet the user warmly in French right now, introduce yourself as virtual reception agent for the company Telnek (http://telnet.com), and ask how you can help. Be concise and friendly. Do not wait for input.",
+        instructions="Saluez dès maintenant chaleureusement l'utilisateur en français, présentez-vous comme Amélie en tant qu'agent d'accueil de la société Telnek et demandez-lui comment vous pouvez l'aider. Soyez concis et amical.",
+        allow_interruptions=False  # Optionnel : empêche l'utilisateur de couper le greeting
+    )
+
+    # Option alternative plus simple (texte fixe, sans passer par le LLM) :
+    # await session.say(
+    #     "Bonjour ! Je suis Grok, comment puis-je vous aider aujourd'hui ?",
+    #     allow_interruptions=False
+    # )
+
     # Join the room and connect to the user
     await ctx.connect()
 
