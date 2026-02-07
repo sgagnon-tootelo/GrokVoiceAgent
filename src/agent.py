@@ -1,5 +1,10 @@
 import logging
 
+# Force le niveau global (ajoute ça tôt dans agent.py)
+logging.getLogger("livekit.agents").setLevel(logging.DEBUG)     # ou WARNING, ERROR, etc.
+logging.getLogger("livekit").setLevel(logging.DEBUG)             # pour les composants LiveKit bas niveau
+logging.getLogger(__name__).setLevel(logging.DEBUG)              # pour ton logger perso
+
 from dotenv import load_dotenv
 from livekit import rtc
 from livekit.agents import (
@@ -17,7 +22,7 @@ from livekit.agents import (
 from livekit.plugins import noise_cancellation, silero, xai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-logger = logging.getLogger("agent")
+logger = logging.getLogger("agent").setLevel(logging.DEBUG)
 
 load_dotenv(".env.local")
 
