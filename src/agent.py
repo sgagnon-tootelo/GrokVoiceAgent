@@ -7,7 +7,7 @@ logging.getLogger("livekit").setLevel(logging.DEBUG)             # pour les comp
 logging.getLogger(__name__).setLevel(logging.DEBUG)              # pour ton logger perso
 
 from dotenv import load_dotenv
-from livekit import rtc
+from livekit import (rtc, api)
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -19,6 +19,7 @@ from livekit.agents import (
     room_io,
     function_tool,
     RunContext,
+    get_job_context,
 )
 from livekit.plugins import noise_cancellation, silero, xai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
@@ -61,12 +62,12 @@ class Assistant(Agent):
                 f"\n\nInformation importante : l'appelant utilise actuellement le numéro de téléphone {caller_number}. Proposez-lui d'utiliser ce numéro (en le confirmant avec lui) s'il désire être rappelé ou s'il souhaite laisser un message."
             )
 
-#        base_instructions += (
-#            "\n\nQuand la conversation est terminée (après avoir aidé l'appelant, pris un message, ou donné les informations demandées), "
-#            "dis poliment au revoir (« Bonne journée ! » ou « Passez une belle journée ! »), "
-#            "puis utilise IMMÉDIATEMENT le tool 'terminer_appel' pour raccrocher. "
-#            "Ne continue jamais la conversation après le au revoir."
-#        )
+        base_instructions += (
+            "Quand la conversation est terminée (le client a eu toutes ses réponses ou veut raccrocher), "
+            "dis poliment au revoir (« Bonne journée ! » ou « Passez une belle journée ! »), "
+            "puis utilise IMMÉDIATEMENT le tool 'end_call' pour terminer l'appel. "
+            "Ne continue jamais la conversation après avoir appelé end_call. "
+        )
 
         # LOG DES INSTRUCTIONS COMPLÈTES ENVOYÉES AU MODÈLE
         logger.info("=== INSTRUCTIONS SYSTÈME ENVOYÉES À GROK ===")
@@ -84,6 +85,7 @@ class Assistant(Agent):
                 xai.realtime.XSearch(),         # search X (Twitter) in realtime
                 xai.realtime.WebSearch(),       # general web search
                 # your own @function_tool decorated methods here
+                end_call
             ],
         )
 
@@ -103,25 +105,33 @@ class Assistant(Agent):
     #     logger.info(f"Looking up weather for {location}")
     #
     #     return "sunny with a temperature of 70 degrees."
+@function_tool
+async def end_call(ctx: RunContext):
+    """Termine l'appel en cours en supprimant la room. À appeler après avoir dit au revoir."""
+    logger.info("Tool end_call appelé – fin de conversation imminente")
+    # Attend que l'agent ait fini de parler entièrement
+    await ctx.wait_for_playout()
     
-    #@function_tool
-    #async def terminer_appel(self, context: RunContext):
-    #    """Utilise ce tool quand la conversation est terminée."""
-    #    logger.info("=== L'AGENT DÉCIDE DE TERMINER L'APPEL ===")
-    #    
-    #    if not self.room:
-    #        logger.error("Room non disponible – impossible de déconnecter l'agent")
-    #        return
-    #    
-    #    try:
-    #        # Délai pour laisser le temps au TTS de terminer le au revoir (ajuste 3-5 secondes selon la longueur typique)
-    #        logger.info("Attente de 4 secondes pour laisser finir le message de fin...")
-    #        await asyncio.sleep(4)   # ← 4 secondes est un bon compromis (teste 3 ou 5 si besoin)
-    #        # Méthode correcte : déconnecte la Room entière (l'agent quitte)
-    #        await self.room.disconnect()
-    #        logger.info("Agent déconnecté de la room → appel terminé, BYE envoyé à Twilio")
-    #    except Exception as e:
-    #        logger.error(f"Erreur lors de la déconnexion de la room : {e}")
+    # Pause naturelle pour éviter toute coupure
+    await asyncio.sleep(1.5)
+    
+    job_ctx = get_job_context()
+    if not job_ctx:
+        logger.warning("Impossible de récupérer le job context dans end_call")
+        return None  # Rien à dire, évite de générer du text supplémentaire
+    
+    room_name = job_ctx.room.name
+    logger.info(f"Suppression de la room {room_name} pour terminer l'appel proprement")
+    
+    try:
+        await job_ctx.api.room.delete_room(
+            api.DeleteRoomRequest(room=room_name)
+        )
+        logger.info("Room supprimée avec succès → SIP BYE envoyé")
+    except Exception as e:
+        logger.error(f"Erreur lors de la suppression de la room : {e}")
+    
+    return None  # Important : retourne None pour ne rien ajouter à la conversation (évite double au revoir)           
 
 server = AgentServer()
 
