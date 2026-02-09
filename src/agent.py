@@ -1,6 +1,11 @@
 import logging
 import asyncio
 
+import os
+from twilio.rest import Client
+from typing import Optional
+from datetime import datetime
+
 # Force le niveau global (ajoute ça tôt dans agent.py)
 logging.getLogger("livekit.agents").setLevel(logging.DEBUG)     # ou WARNING, ERROR, etc.
 logging.getLogger("livekit").setLevel(logging.DEBUG)             # pour les composants LiveKit bas niveau
@@ -42,7 +47,14 @@ class Assistant(Agent):
             #"Utilise des contractions courantes (« j'peux », « c'est », « y'a », « j'vas »), des expressions québécoises naturelles (« une petite seconde », « parfait », « OK », « merci ben » quand ça fit), et un rythme détendu mais professionnel."
             "Tu gères les demandes classiques :"
             #"Transfert d'appel : confirme le nom ou le département, puis dis « OK, un moment s'il vous plait, je vous transfère à [nom/département]. Merci de patienter ! »"
-            "Prise de message : pose les questions nécessaires (nom, numéro, raison de l'appel), répète pour confirmer, puis dis « Parfait, je transmets votre message à [personne] dès que possible. Merci d'avoir appelé ! »"
+            "Prise de message :"
+            "- Demande poliment le nom complet de l'appelant."
+            "- Propose d'utiliser le numéro actuel pour le rappel (tu connais déjà le numéro {caller_number} grâce aux infos système)."
+            "- Demande ou confirme le numéro de rappel (pose la question lentement pour qu'il puisse dicter)."
+            "- Demande la raison détaillée de l'appel ou le message à transmettre."
+            "- Répète TOUT pour confirmation : « Juste pour confirmer : votre nom est [nom], je vous rappelle au [numéro], et le message est [raison]. C'est bien ça ? »"
+            "- Une fois confirmé, appelle IMMÉDIATEMENT le tool take_message avec les paramètres exacts (name, callback_number, reason)."
+            "- Ensuite, dis poliment « Parfait, je transmets votre message dès que possible. Merci d'avoir appelé ! » puis utilise le tool end_call pour terminer."
             #"Informations générales : réponds brièvement aux questions fréquentes sur les horaires, l'adresse ou les services de Telnek. Si tu ne sais pas, dis poliment « Je vais vous transférer à la bonne personne qui va pouvoir vous aider mieux que moi. »"
             "Si on te demande l'adresse c'est le «sept cents soixante et quatre, Avenue Prieur à Laval, Québec. H7E 2V3 »"
             "Les bureau son ouvert du lundi au vendredi de 9 heure du matin a 5 heure de l'après-midi."
@@ -85,7 +97,8 @@ class Assistant(Agent):
                 xai.realtime.XSearch(),         # search X (Twitter) in realtime
                 xai.realtime.WebSearch(),       # general web search
                 # your own @function_tool decorated methods here
-                end_call
+                end_call,
+                take_message
             ],
         )
 
@@ -132,6 +145,56 @@ async def end_call(ctx: RunContext):
         logger.error(f"Erreur lors de la suppression de la room : {e}")
     
     return None  # Important : retourne None pour ne rien ajouter à la conversation (évite double au revoir)           
+
+@function_tool
+async def take_message(ctx: RunContext, name: str, callback_number: Optional[str] = None, reason: str = ""):
+    """Enregistre un message laissé par l'appelant et envoie un SMS à l'équipe Telnek."""
+    await ctx.wait_for_playout()  # Au cas où, pour ne pas couper Amélie
+    
+    job_ctx = get_job_context()
+    if not job_ctx:
+        logger.warning("Job context indisponible dans take_message")
+        return None
+    
+    room = job_ctx.room
+    
+    # Récupère le numéro appelant réel (via participant SIP)
+    sip_participant = next(
+        (p for p in room.remote_participants.values() 
+         if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP),
+        None,
+    )
+    caller_number = "inconnu"
+    if sip_participant and sip_participant.identity.startswith("sip_"):
+        caller_number = sip_participant.identity[4:]  # enlève "sip_"
+        # Optionnel : nettoyer +1 si présent
+        if caller_number.startswith("+1"):
+            caller_number = caller_number[2:]
+    
+    # Si pas de numéro de rappel spécifié → utilise le numéro appelant
+    final_callback = callback_number or caller_number
+    
+    # Envoie le SMS via Twilio
+    try:
+        client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+        body = (
+            f"📩 Nouveau message Telnek !\n\n"
+            f"👤 De : {name}\n"
+            f"📞 Appelant : {caller_number}\n"
+            f"🔄 Rappel au : {final_callback}\n"
+            f"💬 Message : {reason}\n\n"
+            f"Heure : {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        )        
+        message = client.messages.create(
+            to=os.getenv("ADMIN_PHONE_NUMBER"),
+            from_=os.getenv("TWILIO_PHONE_NUMBER"),
+            body=body
+        )
+        logger.info(f"SMS envoyé avec succès (SID: {message.sid}) pour {name}")
+    except Exception as e:
+        logger.error(f"Erreur envoi SMS Twilio : {e}")
+    
+    return None  # Rien à dire → évite que Amélie répète quelque chose d’inutile
 
 server = AgentServer()
 
