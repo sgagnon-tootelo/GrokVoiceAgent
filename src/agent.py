@@ -103,24 +103,25 @@ class Assistant(Agent):
     #     logger.info(f"Looking up weather for {location}")
     #
     #     return "sunny with a temperature of 70 degrees."
-    @function_tool
-    async def terminer_appel(self, context: RunContext):
-        """Utilise ce tool quand la conversation est terminée."""
-        logger.info("=== L'AGENT DÉCIDE DE TERMINER L'APPEL ===")
-        
-        if not self.room:
-            logger.error("Room non disponible – impossible de déconnecter l'agent")
-            return
-        
-        try:
-            # Délai pour laisser le temps au TTS de terminer le au revoir (ajuste 3-5 secondes selon la longueur typique)
-            logger.info("Attente de 4 secondes pour laisser finir le message de fin...")
-            await asyncio.sleep(4)   # ← 4 secondes est un bon compromis (teste 3 ou 5 si besoin)
-            # Méthode correcte : déconnecte la Room entière (l'agent quitte)
-            await self.room.disconnect()
-            logger.info("Agent déconnecté de la room → appel terminé, BYE envoyé à Twilio")
-        except Exception as e:
-            logger.error(f"Erreur lors de la déconnexion de la room : {e}")
+    
+    #@function_tool
+    #async def terminer_appel(self, context: RunContext):
+    #    """Utilise ce tool quand la conversation est terminée."""
+    #    logger.info("=== L'AGENT DÉCIDE DE TERMINER L'APPEL ===")
+    #    
+    #    if not self.room:
+    #        logger.error("Room non disponible – impossible de déconnecter l'agent")
+    #        return
+    #    
+    #    try:
+    #        # Délai pour laisser le temps au TTS de terminer le au revoir (ajuste 3-5 secondes selon la longueur typique)
+    #        logger.info("Attente de 4 secondes pour laisser finir le message de fin...")
+    #        await asyncio.sleep(4)   # ← 4 secondes est un bon compromis (teste 3 ou 5 si besoin)
+    #        # Méthode correcte : déconnecte la Room entière (l'agent quitte)
+    #        await self.room.disconnect()
+    #        logger.info("Agent déconnecté de la room → appel terminé, BYE envoyé à Twilio")
+    #    except Exception as e:
+    #        logger.error(f"Erreur lors de la déconnexion de la room : {e}")
 
 server = AgentServer()
 
@@ -275,7 +276,7 @@ async def my_agent(ctx: JobContext):
     await session.generate_reply(
     #    #instructions="Greet the user warmly in French right now, introduce yourself as virtual reception agent for the company Telnek (http://telnet.com), and ask how you can help. Be concise and friendly. Do not wait for input.",
         instructions=greeting_instructions,
-        #allow_interruptions=False  # Optionnel : empêche l'utilisateur de couper le greeting
+        allow_interruptions=False  # Optionnel : empêche l'utilisateur de couper le greeting
     )
 
     # Option alternative plus simple (texte fixe, sans passer par le LLM) :
