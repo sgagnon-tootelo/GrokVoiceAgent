@@ -1,4 +1,5 @@
 import logging
+import asyncio
 
 # Force le niveau global (ajoute ça tôt dans agent.py)
 logging.getLogger("livekit.agents").setLevel(logging.DEBUG)     # ou WARNING, ERROR, etc.
@@ -30,6 +31,7 @@ load_dotenv(".env.local")
 
 class Assistant(Agent):
     def __init__(self, caller_number: str | None = None) -> None:
+        self.room: rtc.Room | None = None
         base_instructions = (
             "Tu es Amélie, une réceptionniste virtuelle chaleureuse, professionnelle et efficace pour la compagnie Telnek."
             "Tu parles en français québécois courant, avec un ton poli, souriant et naturel, comme une vraie personne au téléphone au Québec."
@@ -58,6 +60,13 @@ class Assistant(Agent):
             base_instructions += (
                 f"\n\nInformation importante : l'appelant utilise actuellement le numéro de téléphone {caller_number}. Proposez-lui d'utiliser ce numéro (en le confirmant avec lui) s'il désire être rappelé ou s'il souhaite laisser un message."
             )
+
+#        base_instructions += (
+#            "\n\nQuand la conversation est terminée (après avoir aidé l'appelant, pris un message, ou donné les informations demandées), "
+#            "dis poliment au revoir (« Bonne journée ! » ou « Passez une belle journée ! »), "
+#            "puis utilise IMMÉDIATEMENT le tool 'terminer_appel' pour raccrocher. "
+#            "Ne continue jamais la conversation après le au revoir."
+#        )
 
         # LOG DES INSTRUCTIONS COMPLÈTES ENVOYÉES AU MODÈLE
         logger.info("=== INSTRUCTIONS SYSTÈME ENVOYÉES À GROK ===")
@@ -94,7 +103,24 @@ class Assistant(Agent):
     #     logger.info(f"Looking up weather for {location}")
     #
     #     return "sunny with a temperature of 70 degrees."
-
+    @function_tool
+    async def terminer_appel(self, context: RunContext):
+        """Utilise ce tool quand la conversation est terminée."""
+        logger.info("=== L'AGENT DÉCIDE DE TERMINER L'APPEL ===")
+        
+        if not self.room:
+            logger.error("Room non disponible – impossible de déconnecter l'agent")
+            return
+        
+        try:
+            # Délai pour laisser le temps au TTS de terminer le au revoir (ajuste 3-5 secondes selon la longueur typique)
+            logger.info("Attente de 4 secondes pour laisser finir le message de fin...")
+            await asyncio.sleep(4)   # ← 4 secondes est un bon compromis (teste 3 ou 5 si besoin)
+            # Méthode correcte : déconnecte la Room entière (l'agent quitte)
+            await self.room.disconnect()
+            logger.info("Agent déconnecté de la room → appel terminé, BYE envoyé à Twilio")
+        except Exception as e:
+            logger.error(f"Erreur lors de la déconnexion de la room : {e}")
 
 server = AgentServer()
 
@@ -216,8 +242,12 @@ async def my_agent(ctx: JobContext):
     # await avatar.start(session, room=ctx.room)
 
     # Start the session, which initializes the voice pipeline and warms up the models
+    # Crée l'instance Assistant D'ABORD
+    assistant = Assistant(caller_number=caller_number)
+
+    # Démarre la session avec cette instance
     await session.start(
-        agent=Assistant(caller_number=caller_number),
+        agent=assistant,
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
@@ -231,6 +261,10 @@ async def my_agent(ctx: JobContext):
         ),
     )
 
+    # ENSUITE, stocke la room directement dans l'instance assistant
+    assistant.room = ctx.room
+    logger.info("Room stockée dans l'instance Assistant pour le tool hangup")
+
     # greeting immédiat pour les appels entrants (Twilio/SIP)
     # On utilise generate_reply avec des instructions pour que Grok génère un bonjour naturel
     greeting_instructions = "Saluez dès maintenant chaleureusement l'utilisateur en français, présentez-vous comme Amélie en tant qu'agent d'accueil de la société Telnek et demandez-lui comment vous pouvez l'aider. Soyez concis et amical."
@@ -241,7 +275,7 @@ async def my_agent(ctx: JobContext):
     await session.generate_reply(
     #    #instructions="Greet the user warmly in French right now, introduce yourself as virtual reception agent for the company Telnek (http://telnet.com), and ask how you can help. Be concise and friendly. Do not wait for input.",
         instructions=greeting_instructions,
-        allow_interruptions=False  # Optionnel : empêche l'utilisateur de couper le greeting
+        #allow_interruptions=False  # Optionnel : empêche l'utilisateur de couper le greeting
     )
 
     # Option alternative plus simple (texte fixe, sans passer par le LLM) :
