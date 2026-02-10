@@ -9,7 +9,7 @@ description = "Simple voice AI assistant built with LiveKit Agents for Python"
 requires-python = ">=3.10, <3.14"
 
 dependencies = [
-    "livekit-agents[silero,turn-detector,xai]~=1.3",
+    "livekit-agents[deepgram,silero,turn-detector,xai]~=1.3",
     "livekit-plugins-noise-cancellation~=0.2",
     "python-dotenv",
     "twilio>=9.10.1",
