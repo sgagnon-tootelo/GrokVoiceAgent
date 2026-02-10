@@ -29,11 +29,20 @@ from livekit.agents import (
 from livekit.plugins import noise_cancellation, silero, xai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+from typing import Optional
+
 logger = logging.getLogger("agent")
 logger.setLevel(logging.DEBUG)
 
 load_dotenv(".env.local")
 
+def format_phone(number: str) -> str:
+    number = ''.join(filter(str.isdigit, number))
+    if len(number) == 10:
+        return f"({number[:3]}) {number[3:6]}-{number[6:]}"
+    elif len(number) == 11 and number.startswith('1'):
+        return f"({number[1:4]}) {number[4:7]}-{number[7:]}"
+    return number
 
 class Assistant(Agent):
     def __init__(self, caller_number: str | None = None) -> None:
@@ -191,6 +200,22 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
             body=body
         )
         logger.info(f"SMS envoyé avec succès (SID: {message.sid}) pour {name}")
+
+        # === NOUVEAU : SMS de confirmation à l'appelant (pour tester) ===
+        confirmation_body = (
+            "Merci ! 😊\n"
+            "Votre message a bien été transmis à l'équipe Telnek.\n"
+            f"Nous vous rappelons au {format_phone(final_callback)} dès que possible.\n"
+            "Passez une belle journée !\n"
+            "Amélie, réceptionniste virtuelle Telnek"
+        )
+        confirmation_message = client.messages.create(
+            to=final_callback,  # Ou caller_number si tu préfères forcer le numéro appelant
+            from_=os.getenv("TWILIO_PHONE_NUMBER"),
+            body=confirmation_body
+        )
+        logger.info(f"SMS confirmation envoyé à l'appelant (SID: {confirmation_message.sid}) – {final_callback}")
+
     except Exception as e:
         logger.error(f"Erreur envoi SMS Twilio : {e}")
     
