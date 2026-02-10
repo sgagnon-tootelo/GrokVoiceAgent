@@ -1,15 +1,10 @@
 import logging
 import asyncio
-
 import os
+
 from twilio.rest import Client
 from typing import Optional
 from datetime import datetime
-
-# Force le niveau global (ajoute ça tôt dans agent.py)
-logging.getLogger("livekit.agents").setLevel(logging.DEBUG)     # ou WARNING, ERROR, etc.
-logging.getLogger("livekit").setLevel(logging.DEBUG)             # pour les composants LiveKit bas niveau
-logging.getLogger(__name__).setLevel(logging.DEBUG)              # pour ton logger perso
 
 from dotenv import load_dotenv
 from livekit import (rtc, api)
@@ -28,8 +23,14 @@ from livekit.agents import (
 )
 from livekit.plugins import noise_cancellation, silero, xai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
+from livekit.plugins import deepgram
 
 from typing import Optional
+
+# Force le niveau global (ajoute ça tôt dans agent.py)
+logging.getLogger("livekit.agents").setLevel(logging.DEBUG)      # ou WARNING, ERROR, etc.
+logging.getLogger("livekit").setLevel(logging.DEBUG)             # pour les composants LiveKit bas niveau
+logging.getLogger(__name__).setLevel(logging.DEBUG)              # pour ton logger perso
 
 logger = logging.getLogger("agent")
 logger.setLevel(logging.DEBUG)
@@ -48,63 +49,69 @@ def format_phone(number: str) -> str:
     return number
 
 # Charge les vars personnalisées depuis le .env (avec fallback Telnek pour tes tests)
+agent_name = os.getenv("AGENT_NAME", "Amélie")
 company_name = os.getenv("COMPANY_NAME", "Telnek")
 company_address = os.getenv("COMPANY_ADDRESS", "sept cents soixante et quatre, Avenue Prieur à Laval, Québec. H7E 2V3")
 company_hours = os.getenv("COMPANY_HOURS", "lundi au vendredi de 9 heure du matin a 5 heure de l'après-midi")
-
-# Log pour déboguer (tu verras ça au démarrage)
-logger.info(f"COMPANY_NAME chargé : {company_name}")
-logger.info(f"COMPANY_ADDRESS chargé : {company_address}")
-logger.info(f"COMPANY_HOURS chargé : {company_hours}")
-
 
 class Assistant(Agent):
     def __init__(self, caller_number: str | None = None) -> None:
         self.room: rtc.Room | None = None
 
+        logger.debug(f"AGENT_NAME: {agent_name}")
+        logger.debug(f"COMPANY_NAME: {company_name}")
+        logger.debug(f"COMPANY_ADDRESS: {company_address}")
+        logger.debug(f"COMPANY_HOURS: {company_hours}")
 
         base_instructions = (
-            f"Tu es Amélie, une réceptionniste virtuelle chaleureuse, professionnelle et efficace pour la compagnie {company_name}."
-            f"Tu parles en français québécois courant, avec un ton poli, souriant et naturel, comme une vraie personne au téléphone au Québec."
-            f"Tu peux aussi poursuivre la conversation en anglais si tu détectes que ton interlocuteur est anglophone et tu continue a lui parler en anglais." 
-            f"Quand l'appel commence, salue toujours l'appelant comme ça: « Bonjour, vous êtes bien chez {company_name}, mon nom est Amélie. Comment je peux vous aider ? »"
-            #"Tes réponses doivent être courtes, claires et adaptées à la parole: maximum 3-4 phrases à la fois."
-            #"Utilise des contractions courantes (« j'peux », « c'est », « y'a », « j'vas »), des expressions québécoises naturelles (« une petite seconde », « parfait », « OK », « merci ben » quand ça fit), et un rythme détendu mais professionnel."
-            f"Tu gères les demandes classiques :"
-            #"Transfert d'appel : confirme le nom ou le département, puis dis « OK, un moment s'il vous plait, je vous transfère à [nom/département]. Merci de patienter ! »"
-            f"Prise de message :"
-            f"- Demande poliment le nom complet de l'appelant."
-            f"- Propose d'utiliser le numéro actuel pour le rappel (tu connais déjà le numéro {caller_number} grâce aux infos système)."
-            f"- Demande ou confirme le numéro de rappel (pose la question lentement pour qu'il puisse dicter)."
-            f"- Demande la raison détaillée de l'appel ou le message à transmettre."
-            f"- Répète TOUT pour confirmation : « Juste pour confirmer : votre nom est [nom], je vous rappelle au [numéro], et le message est [raison]. C'est bien ça ? »"
-            f"- Une fois confirmé, appelle IMMÉDIATEMENT le tool take_message avec les paramètres exacts (name, callback_number, reason)."
-            f"- Ensuite, dis poliment « Parfait, je transmets votre message dès que possible. Merci d'avoir appelé ! » puis utilise le tool end_call pour terminer."
-            #"Informations générales : réponds brièvement aux questions fréquentes sur les horaires, l'adresse ou les services de Telnek. Si tu ne sais pas, dis poliment « Je vais vous transférer à la bonne personne qui va pouvoir vous aider mieux que moi. »"
-            f"Si on te demande l'adresse c'est le « {company_address} »"
-            f"Les bureau son ouvert du {company_hours}."
-            f"Fin d'appel : termine toujours poliment avec « Bonne journée ! » ou « Passez une belle journée ! » selon le contexte."
-            f"Reste toujours dans ton rôle de réceptionniste. Ne mentionne jamais que tu es une IA ou que tu as des limitations techniques, sauf si on te le demande explicitement. Si l'appelant est impoli ou hors sujet, reste calme et professionnelle et propose de transférer ou de prendre un message."
-            f"Quand tu dois répéter, confirmer ou dicter un numéro de téléphone, fais-le TRÈS lentement et TRÈS clairement. "
-            f"Prononce les chiffres un par un (ou par petits groupes de 2-3 maximum) avec des pauses naturelles entre chaque groupe. "
+            f"Tu es {agent_name}, une réceptionniste virtuelle chaleureuse, professionnelle et efficace pour la compagnie {company_name}.\n"
+            f"Tu parles en français québécois courant, avec un ton poli, souriant et naturel, comme une vraie personne au téléphone au Québec.\n"
+            f"Tes réponses doivent être courtes et naturelles : maximum 2-3 phrases à la fois. Parle à un rythme détendu, avec des pauses naturelles comme une vraie personne. Utilise des contractions courantes du français québécois (« j’peux », « c’est », « y’a », « j’vas », « laissez-moi »), des petites expressions chaleureuses (« une petite seconde », « parfait », « OK », « merci ben » quand ça fit), mais reste toujours polie et professionnelle.\n"
+            f"Toujours vouvoyer l’appelant : utilise « vous », « laissez-moi », « pourriez-vous », etc. Évite complètement le tutoiement et les expressions trop familières comme « bein » (dis plutôt « bien »). Reste chaleureuse mais professionnelle.\n"
+            f"Tu peux aussi poursuivre la conversation en anglais si tu détectes que ton interlocuteur est anglophone et tu continue a lui parler en anglais tout le reste de l'appel.\n" 
+            f"Quand l'appel commence, salue toujours l'appelant comme ça: « Bonjour, vous êtes bien chez {company_name}, mon nom est {agent_name}. Comment je peux vous aider ? »\n"
+            f"Tu gères les demandes classiques :\n"
+            #f"Transfert d'appel : confirme le nom ou le département, puis dis « OK, un moment s'il vous plait, je vous transfère à [nom/département]. Merci de patienter ! »\n"
+            f"Prise de message ou rendez-vous :\n"
+            f"- Commence par demander la personne recherchée ou le département.\n"
+            f"- Ensuite, demande le sujet ou la raison de l'appel (une seule question).\n"
+            f"- Propose d'abord d'utiliser le numéro actuel pour le rappel : « Je peux utiliser le numéro d'où vous appelez, qui est le [numéro formaté lentement], ou préférez-vous m'en donner un autre ? »\n"
+            f"- Si l'appelant confirme le numéro actuel ou en donne un autre, note-le sans répéter inutilement.\n"
+            f"- Demande le nom complet seulement quand c'est nécessaire, et toujours séparément.\n"
+            f"- Une fois toutes les infos recueillies, répète UNE SEULE FOIS pour confirmation : « Juste pour confirmer : [nom], [numéro], [message/sujet]. C’est bien ça ? »\n"
+            f"- Pose toujours UNE SEULE question ou demande à la fois. Attends la réponse complète de l’appelant avant de continuer. Progresse étape par étape, calmement.\n"
+            f"- Une fois confirmé, appelle IMMÉDIATEMENT le tool take_message avec les paramètres exacts (name, callback_number, reason).\n"
+            f"- APRÈS avoir appelé take_message, dis EXACTEMENT cette phrase finale comme dernière réponse : « Parfait, je transmets votre message dès que possible. Merci d'avoir appelé ! Passez une belle journée ! »\n"
+            f"- Parle cette phrase calmement et chaleureusement, avec une pause naturelle à la fin.\n"
+            f"- IMMÉDIATEMENT après avoir fini de dire cette phrase (et seulement après), appelle le tool end_call pour terminer l'appel.\n"
+            f"- Ne dis RIEN d'autre. Ne pose plus de question. Ne relance pas.\n"            f"Les bureau son ouvert du {company_hours}.\n"
+            f"Demande d'informations générales (heures, adresse, etc.) :\n"
+            f"- Réponds brièvement et poliment à la question (ex. : heures d'ouverture, adresse).\n"
+            f"- Ensuite, demande naturellement : « Est-ce que je peux vous aider avec autre chose ? » ou « Y'a-tu autre chose que je peux faire pour vous ? »\n"
+            f"- Si l'appelant dit non, merci, au revoir, ou reste silencieux (5-10 secondes),\n"
+            f"- Conclus immédiatement avec « Parfait ! Passez une belle journée ! » ou « Merci d'avoir appelé, bonne journée ! »\n"
+            f"- Puis appelle IMMÉDIATEMENT le tool end_call.\n"
+            f"- Ne relance pas plusieurs fois. Ne pose plus de questions.\n"
+            f"Fin d'appel : termine toujours poliment avec « Bonne journée ! » ou « Passez une belle journée ! » selon le contexte.\n"
+            f"Reste toujours dans ton rôle de réceptionniste. Ne mentionne jamais que tu es une IA ou que tu as des limitations techniques, sauf si on te le demande explicitement. Si l'appelant est impoli ou hors sujet, reste calme et professionnelle et propose de transférer ou de prendre un message.\n"
+            f"Quand tu dois répéter, confirmer ou dicter un numéro de téléphone, fais-le TRÈS lentement et TRÈS clairement. \n"
+            f"Prononce les chiffres un par un (ou par petits groupes de 2-3 maximum) avec des pauses naturelles entre chaque groupe. \n"
             f"Exemple pour le numéro (514) 947-4976 :\n"
             f"« Cinq... un... quatre... neuf... quatre... sept... quatre... neuf... sept... six. »\n"
             f"Ou de façon plus naturelle au Québec : « Cinq un quatre... neuf quatre sept... quatre neuf sept six. »\n"
-            #"Insiste sur les pauses et parle posément pour que l'appelant puisse noter facilement. "
-            #"Répète toujours le numéro complet au moins une fois pour confirmation."
-        )
+            #f"Insiste sur les pauses et parle posément pour que l'appelant puisse noter facilement. \n"
+            #f"Répète toujours le numéro complet au moins une fois pour confirmation.\n"
+            f"Fin d'appel générale (pour tous les cas sans prise de message ou quand la demande est satisfaite) :\n"
+            f"- Quand l'appelant a eu sa réponse et dit qu'il n'a besoin de rien d'autre (ou reste silencieux 10-15 secondes après ta question « Autre chose ? »),\n"
+            f"- Dis poliment « Parfait, merci d'avoir appelé ! Passez une belle journée ! »\n"
+            f"- Puis appelle IMMÉDIATEMENT le tool end_call.\n"
+            f"- Si silence prolongé à tout moment (plus de 20 secondes sans réponse), applique la même clôture sans relance supplémentaire.\n"        
+            )
 
         if caller_number:
             base_instructions += (
-                f"\n\nInformation importante : l'appelant utilise actuellement le numéro de téléphone {caller_number}. Proposez-lui d'utiliser ce numéro (en le confirmant avec lui) s'il désire être rappelé ou s'il souhaite laisser un message."
+                f"Information importante : l'appelant utilise actuellement le numéro de téléphone {caller_number}. Proposez-lui d'utiliser ce numéro (en le confirmant avec lui) s'il désire être rappelé ou s'il souhaite laisser un message.\n"
             )
-
-        base_instructions += (
-            "Quand la conversation est terminée (le client a eu toutes ses réponses ou veut raccrocher), "
-            "dis poliment au revoir (« Bonne journée ! » ou « Passez une belle journée ! »), "
-            "puis utilise IMMÉDIATEMENT le tool 'end_call' pour terminer l'appel. "
-            "Ne continue jamais la conversation après avoir appelé end_call. "
-        )
 
         # LOG DES INSTRUCTIONS COMPLÈTES ENVOYÉES AU MODÈLE
         logger.info("=== INSTRUCTIONS SYSTÈME ENVOYÉES À GROK ===")
@@ -151,7 +158,7 @@ async def end_call(ctx: RunContext):
     await ctx.wait_for_playout()
     
     # Pause naturelle pour éviter toute coupure
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(5.0)
     
     job_ctx = get_job_context()
     if not job_ctx:
@@ -234,8 +241,8 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
 
     except Exception as e:
         logger.error(f"Erreur envoi SMS Twilio : {e}")
-    
-    return None  # Rien à dire → évite que Amélie répète quelque chose d’inutile
+        
+    return None  # Le modèle ne dira rien automatiquement du tool
 
 server = AgentServer()
 
@@ -256,15 +263,15 @@ async def my_agent(ctx: JobContext):
     }
 
     # Set up a voice AI pipeline using OpenAI, Cartesia, Deepgram, and the LiveKit turn detector
-    session = AgentSession(
+    #session = AgentSession(
         # Speech-to-text (STT) is your agent's ears, turning the user's speech into text that the LLM can understand
         # See all available models at https://docs.livekit.io/agents/models/stt/
         #stt=inference.STT(model="deepgram/nova-3", language="multi"),
         # A Large Language Model (LLM) is your agent's brain, processing user input and generating a response
         # See all available models at https://docs.livekit.io/agents/models/llm/
         #llm=inference.LLM(model="openai/gpt-4.1-mini"),
-        llm=xai.realtime.RealtimeModel(
-            voice="ara",                # default voice; "ara", others listed
+    #    llm=xai.realtime.RealtimeModel(
+    #        voice="ara",                # default voice; "ara", others listed
             # Optional: custom turn detection (server VAD is used by default)
             # turn_detection=None,            # to disable built-in turn detection
             # or customize:
@@ -273,7 +280,7 @@ async def my_agent(ctx: JobContext):
             #     silence_duration_ms=250,
             #     prefix_padding_ms=300,
             # ),
-        ),
+    #    ),
         # Text-to-speech (TTS) is your agent's voice, turning the LLM's text into speech that the user can hear
         # See all available models as well as voice selections at https://docs.livekit.io/agents/models/tts/
         #tts=inference.TTS(
@@ -282,11 +289,24 @@ async def my_agent(ctx: JobContext):
         # VAD and turn detection are used to determine when the user is speaking and when the agent should respond
         # See more at https://docs.livekit.io/agents/build/turns
         #turn_detection=MultilingualModel(),
-        vad=ctx.proc.userdata["vad"],
+    #    vad=ctx.proc.userdata["vad"],
         # allow the LLM to generate a response while waiting for the end of turn
         # See more at https://docs.livekit.io/agents/build/audio/#preemptive-generation
+    #    preemptive_generation=True,
+    #)
+
+    session = AgentSession(
+        stt=deepgram.STT(
+            language="fr-CA",       # Accent québécois bien géré
+            interim_results=True,   # Transcripts en temps réel
+        ),
+        llm=xai.realtime.RealtimeModel(
+            voice="ara",
+        ),
+        vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )
+
 
 # Récupérer le participant SIP (l'appelant) – peut être None au début à cause du timing
     caller_participant = next(
@@ -380,17 +400,39 @@ async def my_agent(ctx: JobContext):
     assistant.room = ctx.room
     logger.info("Room stockée dans l'instance Assistant pour le tool hangup")
 
+    # Logging des transcripts en temps réel (client et Amélie)
+    def on_transcription(transcription: rtc.Transcription):
+        if transcription.segments:
+            text = " ".join(seg.text for seg in transcription.segments).strip()
+            if not text:
+                return
+        
+            participant = transcription.participant
+            if participant and participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                logger.info(f"👤 Client a dit : {text}")
+            else:
+                logger.info(f"🤖 Amélie a dit : {text}")
+
+    # Abonne à l'événement de transcription de la room
+    ctx.room.on("transcription_received", on_transcription)
+    logger.info("Logging des transcripts activé via room events (client et Amélie)")
+
     # greeting immédiat pour les appels entrants (Twilio/SIP)
-    # On utilise generate_reply avec des instructions pour que Grok génère un bonjour naturel
-    greeting_instructions = f"Saluez dès maintenant chaleureusement l'utilisateur en français, présentez-vous comme Amélie en tant qu'agent d'accueil de la société {company_name} et demandez-lui comment vous pouvez l'aider. Soyez concis et amical."
-    logger.info("=== INSTRUCTIONS GREETING FORCÉ ===")
-    logger.info(greeting_instructions)
-    logger.info("=== FIN GREETING ===")
+
+    # Greeting fixe et fiable via le modèle realtime
+    welcome_message = f"Bonjour, vous êtes bien chez {company_name}, mon nom est {agent_name}. Comment puis-je vous aider aujourd’hui ?"
+
+    greeting_instructions = (
+        f"Dis EXACTEMENT ceci comme première phrase, sans rien ajouter, sans rien modifier et sans poser d'autre question : "
+        f"« {welcome_message} » "
+        f"Parle calmement, chaleureusement et avec un sourire naturel."
+    )
+
+    logger.info(f"Message de bienvenue forcé : {welcome_message}")
 
     await session.generate_reply(
-    #    #instructions="Greet the user warmly in French right now, introduce yourself as virtual reception agent for the company Telnek (http://telnet.com), and ask how you can help. Be concise and friendly. Do not wait for input.",
         instructions=greeting_instructions,
-        allow_interruptions=False  # Optionnel : empêche l'utilisateur de couper le greeting
+        allow_interruptions=True  # L'appelant peut couper le greeting s'il parle tout de suite
     )
 
     # Option alternative plus simple (texte fixe, sans passer par le LLM) :
