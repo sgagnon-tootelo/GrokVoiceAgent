@@ -1,6 +1,6 @@
 {
   "trunk": {
-    "name": "Mon trunk inbound",
+    "name": "Telnet trunk inbound",
     "numbers": ["+14388147547"],
     "auth_username": "sylvaing-livekit",
     "auth_password": "LiveKit149!"

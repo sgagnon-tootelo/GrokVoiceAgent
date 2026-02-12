@@ -1,0 +1,8 @@
+{
+  "trunk": {
+    "name": "Bell trunk inbound",
+    "numbers": ["+14388144191"],
+    "auth_username": "sylvaing-livekit",
+    "auth_password": "LiveKit149!"
+  }
+}

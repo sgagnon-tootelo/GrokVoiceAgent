@@ -2,7 +2,7 @@
   "dispatch_rule": {
     "rule": {
       "dispatchRuleIndividual": {
-        "roomPrefix": "appel-"
+        "roomPrefix": "bell-"
       }
     }
   }

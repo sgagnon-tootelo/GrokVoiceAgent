@@ -35,10 +35,7 @@ logging.getLogger(__name__).setLevel(logging.DEBUG)              # pour ton logg
 logger = logging.getLogger("agent")
 logger.setLevel(logging.DEBUG)
 
-# Charge le .env spécifique si défini via var d'env, sinon fallback sur .env.local
-dotenv_path = os.getenv("DOTENV_OVERRIDE", ".env.local")
-load_dotenv(dotenv_path)
-logger.info(f"Config chargée depuis : {dotenv_path}")
+load_dotenv(".env.local")
 
 def format_phone(number: str) -> str:
     number = ''.join(filter(str.isdigit, number))
@@ -50,18 +47,24 @@ def format_phone(number: str) -> str:
 
 # Charge les vars personnalisées depuis le .env (avec fallback Telnek pour tes tests)
 agent_name = os.getenv("AGENT_NAME", "Amélie")
-company_name = os.getenv("COMPANY_NAME", "Telnek")
-company_address = os.getenv("COMPANY_ADDRESS", "sept cents soixante et quatre, Avenue Prieur à Laval, Québec. H7E 2V3")
-company_hours = os.getenv("COMPANY_HOURS", "lundi au vendredi de 9 heure du matin a 5 heure de l'après-midi")
 
 class Assistant(Agent):
-    def __init__(self, caller_number: str | None = None) -> None:
+    def __init__(
+            self, 
+            caller_number: Optional[str] = None,
+            company_name: str = "Telnek",
+            company_address: str = "",
+            company_hours: str = "",
+            admin_phone: str = ""
+            ) -> None:
         self.room: rtc.Room | None = None
+        self.admin_phone = admin_phone
 
         logger.debug(f"AGENT_NAME: {agent_name}")
         logger.debug(f"COMPANY_NAME: {company_name}")
         logger.debug(f"COMPANY_ADDRESS: {company_address}")
         logger.debug(f"COMPANY_HOURS: {company_hours}")
+        logger.debug(f"admin_phone: {admin_phone}")
 
         base_instructions = (
             f"Tu es {agent_name}, une réceptionniste virtuelle chaleureuse, professionnelle et efficace pour la compagnie {company_name}.\n"
@@ -84,7 +87,7 @@ class Assistant(Agent):
             f"- APRÈS avoir appelé take_message, dis EXACTEMENT cette phrase finale comme dernière réponse : « Parfait, je transmets votre message dès que possible. Merci d'avoir appelé ! Passez une belle journée ! »\n"
             f"- Parle cette phrase calmement et chaleureusement, avec une pause naturelle à la fin.\n"
             f"- IMMÉDIATEMENT après avoir fini de dire cette phrase (et seulement après), appelle le tool end_call pour terminer l'appel.\n"
-            f"- Ne dis RIEN d'autre. Ne pose plus de question. Ne relance pas.\n"            f"Les bureau son ouvert du {company_hours}.\n"
+            f"- Ne dis RIEN d'autre. Ne pose plus de question. Ne relance pas.\n"                
             f"Demande d'informations générales (heures, adresse, etc.) :\n"
             f"- Réponds brièvement et poliment à la question (ex. : heures d'ouverture, adresse).\n"
             f"- Ensuite, demande naturellement : « Est-ce que je peux vous aider avec autre chose ? » ou « Y'a-tu autre chose que je peux faire pour vous ? »\n"
@@ -92,6 +95,8 @@ class Assistant(Agent):
             f"- Conclus immédiatement avec « Parfait ! Passez une belle journée ! » ou « Merci d'avoir appelé, bonne journée ! »\n"
             f"- Puis appelle IMMÉDIATEMENT le tool end_call.\n"
             f"- Ne relance pas plusieurs fois. Ne pose plus de questions.\n"
+            f"Les bureau son ouvert du {company_hours}.\n"
+            f"L'adresse est le {company_address}. \n"
             f"Fin d'appel : termine toujours poliment avec « Bonne journée ! » ou « Passez une belle journée ! » selon le contexte.\n"
             f"Reste toujours dans ton rôle de réceptionniste. Ne mentionne jamais que tu es une IA ou que tu as des limitations techniques, sauf si on te le demande explicitement. Si l'appelant est impoli ou hors sujet, reste calme et professionnelle et propose de transférer ou de prendre un message.\n"
             f"Quand tu dois répéter, confirmer ou dicter un numéro de téléphone, fais-le TRÈS lentement et TRÈS clairement. \n"
@@ -218,7 +223,7 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
             f"Heure : {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         )        
         message = client.messages.create(
-            to=os.getenv("ADMIN_PHONE_NUMBER"),
+            to=ctx.agent.admin_phone,
             from_=os.getenv("TWILIO_PHONE_NUMBER"),
             body=body
         )
@@ -307,6 +312,34 @@ async def my_agent(ctx: JobContext):
         preemptive_generation=True,
     )
 
+    # Détection du client par le nom de la room
+    logger.info(f"Room name: {ctx.room.name}")
+    if ctx.room.name.startswith("telnek-"):
+        room_prefix = "telnek-"
+        company_name = "Telnek"
+        company_address = "sept cents soixante et quatre, Avenue Prieur à Laval, Québec. H7E 2V3"
+        company_hours = "lundi au vendredi de 9 heure du matin a 5 heure de l'après-midi"
+        admin_phone = "+15149474976"    
+    elif ctx.room.name.startswith("bell-"):
+        room_prefix = "bell-"
+        company_name = "Bell"
+        company_address = "CP 8787, succursale Centre-ville, Montréal, QC H3C 4R5"
+        company_hours = "lundi au vendredi de 9 heure du matin a 5 heure de l'après-midi"
+        admin_phone = "+15149474976"
+    else:
+        room_prefix = "Inconnue"
+        company_name = "Inconnue"
+        company_address = "Inconnue"
+        company_hours = "Inconnue"
+        admin_phone = "Inconnue"
+
+    globals()["admin_phone"] = admin_phone
+
+    logger.info(f"company_name: {company_name}")
+    logger.info(f"company_address: {company_address}")
+    logger.info(f"company_hours: {company_hours}")
+    logger.info(f"admin_phone: {admin_phone}")
+
 
 # Récupérer le participant SIP (l'appelant) – peut être None au début à cause du timing
     caller_participant = next(
@@ -331,7 +364,7 @@ async def my_agent(ctx: JobContext):
         # Fallback : extraire du nom de la room (format observé : appel-_{numero}_{random})
         logger.info("Participant SIP non détecté immédiatement → fallback sur le nom de la room")
         parts = ctx.room.name.split('_')
-        if len(parts) >= 3 and parts[0] == "appel-":  # ou "appel-" si pas de tiret supplémentaire
+        if len(parts) >= 3 and parts[0] == room_prefix:  # ou "appel-" si pas de tiret supplémentaire
             potential_number = parts[1]
             if potential_number.startswith('+') and potential_number[1:].isdigit():
                 caller_number = potential_number
@@ -358,6 +391,7 @@ async def my_agent(ctx: JobContext):
         else:
             logger.info(f"Numéro non formatable (pas 10 chiffres) : {caller_number} (laissé tel quel)")
 
+
     # To use a realtime model instead of a voice pipeline, use the following session setup instead.
     # (Note: This is for the OpenAI Realtime API. For other providers, see https://docs.livekit.io/agents/models/realtime/))
     # 1. Install livekit-agents[openai]
@@ -378,7 +412,13 @@ async def my_agent(ctx: JobContext):
 
     # Start the session, which initializes the voice pipeline and warms up the models
     # Crée l'instance Assistant D'ABORD
-    assistant = Assistant(caller_number=caller_number)
+    assistant = Assistant(
+        caller_number=caller_number,
+        company_name=company_name,
+        company_address=company_address,
+        company_hours=company_hours,
+        admin_phone=admin_phone
+        )
 
     # Démarre la session avec cette instance
     await session.start(
