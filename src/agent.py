@@ -24,6 +24,7 @@ from livekit.agents import (
 from livekit.plugins import noise_cancellation, silero, xai
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.plugins import deepgram
+#from livekit.agents import Worker, WorkerOptions
 
 from typing import Optional
 
@@ -223,7 +224,7 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
             f"Heure : {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         )        
         message = client.messages.create(
-            to=ctx.agent.admin_phone,
+            to=admin_phone,
             from_=os.getenv("TWILIO_PHONE_NUMBER"),
             body=body
         )
@@ -261,6 +262,11 @@ server.setup_fnc = prewarm
 
 @server.rtc_session()
 async def my_agent(ctx: JobContext):
+#def prewarm(proc: JobProcess):
+#    proc.userdata["vad"] = silero.VAD.load()
+
+#async def entrypoint(ctx: JobContext):
+
     # Logging setup
     # Add any other context you want in all log entries here
     ctx.log_context_fields = {
@@ -487,3 +493,11 @@ async def my_agent(ctx: JobContext):
 
 if __name__ == "__main__":
     cli.run_app(server)
+#    worker = Worker(
+#        entrypoint_fnc=entrypoint,          # ← note le "_fnc"
+#        options=WorkerOptions(
+#            concurrency=5,                  # ← commence par 5, monte à 10-15 après tests
+#        ),
+#        setup_fnc=prewarm,
+#    )
+#    agents.run("amelie", worker)            #
