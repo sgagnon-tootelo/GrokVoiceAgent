@@ -85,6 +85,7 @@ class Assistant(Agent):
             f"- Une fois toutes les infos recueillies, répète UNE SEULE FOIS pour confirmation : « Juste pour confirmer : [nom], [numéro], [message/sujet]. C’est bien ça ? »\n"
             f"- Pose toujours UNE SEULE question ou demande à la fois. Attends la réponse complète de l’appelant avant de continuer. Progresse étape par étape, calmement.\n"
             f"- Une fois confirmé, appelle IMMÉDIATEMENT le tool take_message avec les paramètres exacts (name, callback_number, reason).\n"
+            f"- Ne jamais appeler take_message avant d’avoir reçu une confirmation explicite de l’appelant après le récapitulatif.\n"
             f"- APRÈS avoir appelé take_message, dis EXACTEMENT cette phrase finale comme dernière réponse : « Parfait, je transmets votre message dès que possible. Merci d'avoir appelé ! Passez une belle journée ! »\n"
             f"- Parle cette phrase calmement et chaleureusement, avec une pause naturelle à la fin.\n"
             f"- IMMÉDIATEMENT après avoir fini de dire cette phrase (et seulement après), appelle le tool end_call pour terminer l'appel.\n"
@@ -218,14 +219,14 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
         body = (
             f"📩 Nouveau message Telnek !\n\n"
             f"👤 De : {name}\n"
-            f"📞 Appelant : {caller_number}\n"
-            f"🔄 Rappel au : {final_callback}\n"
+            f"📞 Appelant : {format_phone(caller_number)}\n"
+            f"🔄 Rappel au : {format_phone(final_callback)}\n"
             f"💬 Message : {reason}\n\n"
             f"Heure : {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         )        
         message = client.messages.create(
             to=admin_phone,
-            from_=os.getenv("TWILIO_PHONE_NUMBER"),
+            from_=callee_number,
             body=body
         )
         logger.info(f"SMS envoyé avec succès (SID: {message.sid}) pour {name}")
@@ -240,7 +241,7 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
         )
         confirmation_message = client.messages.create(
             to=final_callback,  # Ou caller_number si tu préfères forcer le numéro appelant
-            from_=os.getenv("TWILIO_PHONE_NUMBER"),
+            from_=callee_number,
             body=confirmation_body
         )
         logger.info(f"SMS confirmation envoyé à l'appelant (SID: {confirmation_message.sid}) – {final_callback}")
@@ -325,26 +326,31 @@ async def my_agent(ctx: JobContext):
         company_name = "Telnek"
         company_address = "sept cents soixante et quatre, Avenue Prieur à Laval, Québec. H7E 2V3"
         company_hours = "lundi au vendredi de 9 heure du matin a 5 heure de l'après-midi"
-        admin_phone = "+15149474976"    
+        admin_phone = "+15149474976"
+        callee_number = "+14388147547"    
     elif ctx.room.name.startswith("bell-"):
         room_prefix = "bell-"
         company_name = "Bell"
         company_address = "CP 8787, succursale Centre-ville, Montréal, QC H3C 4R5"
         company_hours = "lundi au vendredi de 9 heure du matin a 5 heure de l'après-midi"
         admin_phone = "+15149474976"
+        callee_number = "+14388141491"
     else:
         room_prefix = "Inconnue"
         company_name = "Inconnue"
         company_address = "Inconnue"
         company_hours = "Inconnue"
         admin_phone = "Inconnue"
+        callee_number = "Inconnue"
 
     globals()["admin_phone"] = admin_phone
+    globals()["callee_number"] = callee_number
 
     logger.info(f"company_name: {company_name}")
     logger.info(f"company_address: {company_address}")
     logger.info(f"company_hours: {company_hours}")
     logger.info(f"admin_phone: {admin_phone}")
+    logger.info(f"callee_number: {callee_number}")
 
 
 # Récupérer le participant SIP (l'appelant) – peut être None au début à cause du timing
