@@ -6,6 +6,9 @@ from twilio.rest import Client
 from typing import Optional
 from datetime import datetime
 
+import aiohttp
+from bs4 import BeautifulSoup
+
 from dotenv import load_dotenv
 from livekit import (rtc, api)
 from livekit.agents import (
@@ -56,7 +59,8 @@ class Assistant(Agent):
             company_name: str = "Telnek",
             company_address: str = "",
             company_hours: str = "",
-            admin_phone: str = ""
+            admin_phone: str = "",
+            instructions_specific: str = ""
             ) -> None:
         self.room: rtc.Room | None = None
         self.admin_phone = admin_phone
@@ -66,6 +70,7 @@ class Assistant(Agent):
         logger.debug(f"COMPANY_ADDRESS: {company_address}")
         logger.debug(f"COMPANY_HOURS: {company_hours}")
         logger.debug(f"admin_phone: {admin_phone}")
+        logger.debug(f"instructions_specific: {instructions_specific}")
 
         base_instructions = (
             f"Tu es {agent_name}, une réceptionniste virtuelle chaleureuse, professionnelle et efficace pour la compagnie {company_name}.\n"
@@ -134,6 +139,18 @@ class Assistant(Agent):
                 f"Information importante : l'appelant utilise actuellement le numéro de téléphone {caller_number}. Proposez-lui d'utiliser ce numéro (en le confirmant avec lui) s'il désire être rappelé ou s'il souhaite laisser un message.\n"
             )
 
+        if instructions_specific:
+            base_instructions += instructions_specific
+
+        base_instructions += (
+            f"Quand l'appelant demande des informations détaillées qui pourraient être sur le site web de {company_name} \n"
+            f"(services, tarifs, équipe, coordonnées complètes, promotions, etc.), utilise IMMÉDIATEMENT le tool fetch_company_website \n"
+            f"avec la section la plus pertinente ('accueil', 'services', 'contact', 'apropos', 'equipe'). \n"
+            f"Si tu cherches quelque chose de précis, passe-le dans 'query'. \n"
+            f"Ne l'utilise QUE pour l'entreprise en cours ({company_name}). \n"
+            f"Ensuite, résume les infos de façon naturelle, concise et chaleureuse à l'appelant.\n"
+        )
+
         # LOG DES INSTRUCTIONS COMPLÈTES ENVOYÉES AU MODÈLE
         logger.info("=== INSTRUCTIONS SYSTÈME ENVOYÉES À GROK ===")
         logger.info(base_instructions)
@@ -151,7 +168,8 @@ class Assistant(Agent):
                 xai.realtime.WebSearch(),       # general web search
                 # your own @function_tool decorated methods here
                 end_call,
-                take_message
+                take_message,
+                fetch_company_website,
             ],
         )
 
@@ -179,7 +197,7 @@ async def end_call(ctx: RunContext):
     await ctx.wait_for_playout()
     
     # Pause naturelle pour éviter toute coupure
-    await asyncio.sleep(5.0)
+    await asyncio.sleep(3.0)
     
     job_ctx = get_job_context()
     if not job_ctx:
@@ -265,6 +283,80 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
         
     return None  # Le modèle ne dira rien automatiquement du tool
 
+@function_tool
+async def fetch_company_website(ctx: RunContext, section: str = "accueil", query: str = "") -> str:
+    """
+    Récupère des informations actualisées directement du site web de l'entreprise en cours (Telnek ou ÉlectriZone).
+    Utilise ce tool quand l'appelant demande des infos qui pourraient être sur le site (services, tarifs, équipe, etc.).
+
+    Args:
+        section: Section/page du site (ex: "accueil", "services", "contact", "apropos", "equipe").
+                 Si inconnue, fallback sur l'accueil.
+        query: Mot-clé ou question précise pour guider la recherche dans la page.
+    """
+    await ctx.wait_for_playout()
+
+    job_ctx = get_job_context()
+    if not job_ctx:
+        return "Erreur interne : contexte indisponible."
+
+    room_name = job_ctx.room.name
+
+    # Détection de l'entreprise (même logique que dans my_agent)
+    if room_name.startswith("telnek-"):
+        company = "Telnek"
+        base_url = "https://telnek.com"
+        url_map = {
+            "accueil": "/",
+            "services": "/",
+            "contact": "/",
+            "courriel": "/",
+            "nom du président": "/"
+            }
+    elif room_name.startswith("electrizone-"):
+        company = "ÉlectriZone"
+        base_url = "https://www.facebook.com/Electrizone?locale=fr_CA"
+        url_map = {
+            "accueil": "/",                     # Page d'accueil uniquement pour l'instant
+            "license RBQ:": "https://www.construction411.com/electricians/st-pascal/electrizone/"
+        }
+    else:
+        return "Désolé, je n'ai pas accès au site web pour cette entreprise pour le moment."
+
+    # Résolution de l'URL
+    path = url_map.get(section.lower().strip(), "/")
+    url = base_url + path if path.startswith("/") else base_url + "/" + path
+
+    logger.info(f"Tool fetch_company_website appelé → Entreprise: {company} | URL: {url} | Query: {query}")
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    return f"Erreur : impossible de charger la page ({response.status}). Je peux vous donner les infos de base."
+
+                html = await response.text()
+
+                soup = BeautifulSoup(html, "html.parser")
+                for element in soup(["script", "style", "nav", "header", "footer", "aside", "form"]):
+                    element.decompose()
+
+                text = soup.get_text(separator="\n", strip=True)
+
+                max_length = 12000
+                if len(text) > max_length:
+                    text = text[:max_length] + "\n\n... (texte tronqué)"
+
+                result = f"Contenu de la section '{section}' du site {company} ({url}) :\n\n{text}"
+                if query:
+                    result += f"\n\nRecherche spécifique : {query}"
+
+                return result
+
+    except Exception as e:
+        logger.error(f"Erreur fetch site {company} : {e}")
+        return "Désolé, je n'arrive pas à accéder au site pour le moment. Je peux répondre avec les informations générales que je connais."
+
 server = AgentServer()
 
 
@@ -341,14 +433,20 @@ async def my_agent(ctx: JobContext):
         company_address = "sept cents soixante et quatre, Avenue Prieur à Laval, Québec. H7E 2V3"
         company_hours = "lundi au vendredi de 9 heure du matin a 5 heure de l'après-midi"
         admin_phone = "+15149474976"
-        callee_number = "+14388147547"    
-    elif ctx.room.name.startswith("bell-"):
-        room_prefix = "bell-"
-        company_name = "Bell"
-        company_address = "CP 8787, succursale Centre-ville, Montréal, QC H3C 4R5"
-        company_hours = "lundi au vendredi de 9 heure du matin a 5 heure de l'après-midi"
+        callee_number = "+14388147547"
+        instructions_specific = (
+            f"Telnek est une entreprise spécialisée dans les services de centre d'appels, de télémarketing et de centre de contact.\n"
+        )    
+    elif ctx.room.name.startswith("electrizone-"):
+        room_prefix = "electrizone-"
+        company_name = "ÉlectriZone"
+        company_address = "2010 (deux milles dix), rue Alphonse, à Saint-Pascal, Québec. G0L 3Y0"
+        company_hours = "lundi au vendredi de 8 heure à 17 heure"
         admin_phone = "+15149474976"
         callee_number = "+14388141491"
+        instructions_specific = (
+            f"ÉlectriZone se spécialise dans les services électriques. Résidentiel, commercial et agricole.\n"
+        ) 
     else:
         room_prefix = "Inconnue"
         company_name = "Inconnue"
@@ -356,6 +454,7 @@ async def my_agent(ctx: JobContext):
         company_hours = "Inconnue"
         admin_phone = "Inconnue"
         callee_number = "Inconnue"
+        instructions_specific = ""
 
     globals()["admin_phone"] = admin_phone
     globals()["callee_number"] = callee_number
@@ -443,7 +542,8 @@ async def my_agent(ctx: JobContext):
         company_name=company_name,
         company_address=company_address,
         company_hours=company_hours,
-        admin_phone=admin_phone
+        admin_phone=admin_phone,
+        instructions_specific=instructions_specific
         )
 
     # Démarre la session avec cette instance
