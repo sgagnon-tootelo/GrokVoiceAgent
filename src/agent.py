@@ -25,7 +25,7 @@ from livekit.agents import (
     get_job_context,
 )
 from livekit.plugins import noise_cancellation, silero, xai
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
+#from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.plugins import deepgram
 #from livekit.agents import Worker, WorkerOptions
 
@@ -125,23 +125,24 @@ class Assistant(Agent):
             f"Exemple pour le numéro (514) 947-4976 :\n"
             f"« Cinq... un... quatre... neuf... quatre... sept... quatre... neuf... sept... six. »\n"
             f"Ou de façon plus naturelle au Québec : « Cinq un quatre... neuf quatre sept... quatre neuf sept six. »\n"
-            #f"Insiste sur les pauses et parle posément pour que l'appelant puisse noter facilement. \n"
-            #f"Répète toujours le numéro complet au moins une fois pour confirmation.\n"
             f"Fin d'appel générale (pour tous les cas sans prise de message ou quand la demande est satisfaite) :\n"
             f"- Quand l'appelant a eu sa réponse et dit qu'il n'a besoin de rien d'autre (ou reste silencieux 10-15 secondes après ta question « Autre chose ? »),\n"
-            f"- Dis poliment « Parfait, merci d'avoir appelé ! Passez une belle journée ! »\n"
+            f"- Dis poliment « Parfait, merci d'avoir appelé ! Passez une belle journée, au revoir ! »\n"
             f"- Puis appelle IMMÉDIATEMENT le tool end_call.\n"
             f"- Si silence prolongé à tout moment (plus de 20 secondes sans réponse), applique la même clôture sans relance supplémentaire.\n"        
             )
 
+        # numéro de l'appelant est connue
         if caller_number:
             base_instructions += (
                 f"Information importante : l'appelant utilise actuellement le numéro de téléphone {caller_number}. Proposez-lui d'utiliser ce numéro (en le confirmant avec lui) s'il désire être rappelé ou s'il souhaite laisser un message.\n"
             )
 
+        # ajour des instructions spécific pour cette compagnie
         if instructions_specific:
             base_instructions += instructions_specific
 
+        # ajour pour tool fetch_company_website
         base_instructions += (
             f"Quand l'appelant demande des informations détaillées qui pourraient être sur le site web de {company_name} \n"
             f"(services, tarifs, équipe, coordonnées complètes, promotions, etc.), utilise IMMÉDIATEMENT le tool fetch_company_website \n"
@@ -228,6 +229,16 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
         return None
     
     room = job_ctx.room
+    room_name = job_ctx.room.name
+
+    # Détection de l'entreprise
+    if room_name.startswith("telnek-"):
+        company = "Telnek"
+    elif room_name.startswith("electrizone-"):
+        company = "ÉlectriZone"
+    else:
+        company = "Inconnue"
+
     
     # Récupère le numéro appelant réel (via participant SIP)
     sip_participant = next(
@@ -249,7 +260,7 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
     try:
         client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         body = (
-            f"📩 Nouveau message Telnek !\n\n"
+            f"📩 Nouveau message {company} !\n\n"
             f"👤 De : {name}\n"
             f"📞 Appelant : {format_phone(caller_number)}\n"
             f"🔄 Rappel au : {format_phone(final_callback)}\n"
@@ -266,10 +277,10 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
         # === NOUVEAU : SMS de confirmation à l'appelant (pour tester) ===
         confirmation_body = (
             "Merci ! 😊\n"
-            "Votre message a bien été transmis à l'équipe Telnek.\n"
+            f"Votre message a bien été transmis à l'équipe {company}.\n"
             f"Nous vous rappelons au {format_phone(final_callback)} dès que possible.\n"
             "Passez une belle journée !\n"
-            "Amélie, réceptionniste virtuelle Telnek"
+            f"Amélie, réceptionniste virtuelle {company}"
         )
         confirmation_message = client.messages.create(
             to=final_callback,  # Ou caller_number si tu préfères forcer le numéro appelant
@@ -439,13 +450,16 @@ async def my_agent(ctx: JobContext):
         )    
     elif ctx.room.name.startswith("electrizone-"):
         room_prefix = "electrizone-"
-        company_name = "ÉlectriZone"
-        company_address = "2010 (deux milles dix), rue Alphonse, à Saint-Pascal, Québec. G0L 3Y0"
+        company_name = "électri-zone"
+        company_address = "deux milles dix, rue Alphonse, à Saint-Pascal, Québec. G0L 3Y0"
         company_hours = "lundi au vendredi de 8 heure à 17 heure"
         admin_phone = "+15149474976"
         callee_number = "+14388141491"
         instructions_specific = (
-            f"ÉlectriZone se spécialise dans les services électriques. Résidentiel, commercial et agricole.\n"
+            "ÉlectriZone se spécialise dans les services électriques résidentiel, commercial et agricole.\n"
+            "Propriétaire : Guillaume Boucher.\n"
+            "Région desservie : Kamouraska et environs.\n"
+            "Pour plus de détails ou projets en cours, mentionne que nous sommes actifs sur Facebook (ÉlectriZone).\n"
         ) 
     else:
         room_prefix = "Inconnue"
@@ -458,13 +472,6 @@ async def my_agent(ctx: JobContext):
 
     globals()["admin_phone"] = admin_phone
     globals()["callee_number"] = callee_number
-
-    logger.info(f"company_name: {company_name}")
-    logger.info(f"company_address: {company_address}")
-    logger.info(f"company_hours: {company_hours}")
-    logger.info(f"admin_phone: {admin_phone}")
-    logger.info(f"callee_number: {callee_number}")
-
 
 # Récupérer le participant SIP (l'appelant) – peut être None au début à cause du timing
     caller_participant = next(
