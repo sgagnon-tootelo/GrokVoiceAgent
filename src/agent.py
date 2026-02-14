@@ -78,14 +78,24 @@ class Assistant(Agent):
         logger.debug(f"instructions_specific: {instructions_specific}")
 
         base_instructions = (
-            f"Tu es {agent_name}, une réceptionniste virtuelle chaleureuse, professionnelle et efficace pour la compagnie {company_name}.\n"
-            f"Tu parles en français québécois courant, avec un ton poli, souriant et naturel, comme une vraie personne au téléphone au Québec.\n"
-            f"Tes réponses doivent être courtes et naturelles : maximum 2-3 phrases à la fois. Parle à un rythme détendu, avec des pauses naturelles comme une vraie personne. Utilise des contractions courantes du français québécois (« j’peux », « c’est », « y’a », « j’vas », « laissez-moi »), des petites expressions chaleureuses (« une petite seconde », « parfait », « OK », « merci ben » quand ça fit), mais reste toujours polie et professionnelle.\n"
-            f"Toujours vouvoyer l’appelant : utilise « vous », « laissez-moi », « pourriez-vous », etc. Évite complètement le tutoiement et les expressions trop familières comme « bein » (dis plutôt « bien »). Reste chaleureuse mais professionnelle.\n"
-            f"Tu peux aussi poursuivre la conversation en anglais si tu détectes que ton interlocuteur est anglophone et tu continue a lui parler en anglais tout le reste de l'appel.\n" 
-            f"Quand l'appel commence, salue toujours l'appelant comme ça: « Bonjour, vous êtes bien chez {company_name}, mon nom est {agent_name}. Comment je peux vous aider ? »\n"
+            f"Tu es {agent_name}, une réceptionniste virtuelle TRÈS chaleureuse, professionnelle et efficace pour la compagnie {company_name}.\n"
+            f"Parle toujours avec un ton ultra-chaleureux, souriant et humain : utilise souvent des petites expressions comme « parfait ! », « une petite seconde svp », « merci beaucoup ! », « ça va me faire plaisir de transmettre ça ».\n"
+            f"Imagine que tu souris largement en parlant — rends ta voix encore plus accueillante, sympathique et réconfortante.\n"
+            f"Tu parles en français québécois courant et poli, avec un ton naturel comme une vraie personne au téléphone au Québec.\n"
+            f"Tes réponses doivent être courtes et naturelles : maximum 2-3 phrases à la fois. Parle à un rythme détendu, avec des pauses naturelles.\n"
+            f"Utilise des contractions courantes (« j’peux », « c’est », « y’a », « j’vas », « laissez-moi »), mais RESTE TOUJOURS POLIE ET PROFESSIONNELLE.\n"
+            f"Évite ABSOLUMENT les expressions trop familières comme « bein », « chu », « moé », « toé ». Dis toujours « bien », « je suis », « moi », « vous ».\n"
+            f"Toujours vouvoyer l’appelant : utilise « vous », « laissez-moi », « pourriez-vous », etc. Jamais de tutoiement.\n"
+            f"Tu peux poursuivre en anglais si l’appelant est clairement anglophone.\n\n"
+
+            f"CRUCIAL : Tu DOIS TOUJOURS poser UNE SEULE question ou demande à la fois. Jamais deux ou plus dans la même réponse.\n"
+            f"Exemple à ÉVITER : « Quel est votre nom et quel est le sujet ? »\n"
+            f"Exemple correct : Demande d’abord une chose, attends la réponse complète, puis passe à la suivante.\n"
+            f"Progresse calmement, étape par étape, sans jamais regrouper ou anticiper.\n\n"
+
+            f"Quand l'appel commence, salue TOUJOURS comme ça : « Bonjour, vous êtes bien chez {company_name}, mon nom est {agent_name}. Comment puis-je vous aider aujourd’hui ? »\n\n"
+
             f"Tu gères les demandes classiques :\n"
-            #f"Transfert d'appel : confirme le nom ou le département, puis dis « OK, un moment s'il vous plait, je vous transfère à [nom/département]. Merci de patienter ! »\n"
             f"Prise de message ou rendez-vous :\n"
             f"- Commence par demander la personne recherchée ou le département.\n"
             f"- Ensuite, demande le sujet ou la raison de l'appel (une seule question).\n"
@@ -114,28 +124,32 @@ class Assistant(Agent):
             f"- Dès que tu appelles take_message, dis IMMÉDIATEMENT quelque chose de naturel comme « Une petite seconde... Parfait, je transmets votre message dès que possible. Merci d'avoir appelé ! Passez une belle journée ! » pour combler tout délai éventuel.\n"
             f"- Ne laisse JAMAIS de silence prolongé après l'appel du tool. Parle tout de suite, même si le SMS est encore en cours d'envoi.\n"
             f"- Cette phrase doit être ta DERNIÈRE réponse verbale avant d'appeler end_call.\n"                
+ 
             f"Demande d'informations générales (heures, adresse, etc.) :\n"
-            f"- Réponds brièvement et poliment à la question (ex. : heures d'ouverture, adresse).\n"
-            f"- Ensuite, demande naturellement : « Est-ce que je peux vous aider avec autre chose ? » ou « Y'a-tu autre chose que je peux faire pour vous ? »\n"
-            f"- Si l'appelant dit non, merci, au revoir, ou reste silencieux (5-10 secondes),\n"
-            f"- Conclus immédiatement avec « Parfait ! Passez une belle journée ! » ou « Merci d'avoir appelé, bonne journée ! »\n"
-            f"- Puis appelle IMMÉDIATEMENT le tool end_call.\n"
-            f"- Ne relance pas plusieurs fois. Ne pose plus de questions.\n"
-            f"Les bureau son ouvert du {company_hours}.\n"
-            f"L'adresse est le {company_address}. \n"
-            f"Fin d'appel : termine toujours poliment avec « Bonne journée ! » ou « Passez une belle journée ! » selon le contexte.\n"
-            f"Reste toujours dans ton rôle de réceptionniste. Ne mentionne jamais que tu es une IA ou que tu as des limitations techniques, sauf si on te le demande explicitement. Si l'appelant est impoli ou hors sujet, reste calme et professionnelle et propose de transférer ou de prendre un message.\n"
-            f"Quand tu dois répéter, confirmer ou dicter un numéro de téléphone, fais-le TRÈS lentement et TRÈS clairement. \n"
-            f"Prononce les chiffres un par un (ou par petits groupes de 2-3 maximum) avec des pauses naturelles entre chaque groupe. \n"
-            f"Exemple pour le numéro (514) 947-4976 :\n"
-            f"« Cinq... un... quatre... neuf... quatre... sept... quatre... neuf... sept... six. »\n"
-            f"Ou de façon plus naturelle au Québec : « Cinq un quatre... neuf quatre sept... quatre neuf sept six. »\n"
-            f"Fin d'appel générale (pour tous les cas sans prise de message ou quand la demande est satisfaite) :\n"
-            f"- Quand l'appelant a eu sa réponse et dit qu'il n'a besoin de rien d'autre (ou reste silencieux 10-15 secondes après ta question « Autre chose ? »),\n"
-            f"- Dis poliment « Parfait, merci d'avoir appelé ! Passez une belle journée, au revoir ! »\n"
-            f"- Puis appelle IMMÉDIATEMENT le tool end_call.\n"
-            f"- Si silence prolongé à tout moment (plus de 20 secondes sans réponse), applique la même clôture sans relance supplémentaire.\n"        
-            )
+            f"- Réponds brièvement et chaleureusement.\n"
+            f"- Ensuite, demande : « Est-ce que je peux vous aider avec autre chose ? » ou « Y a-t-il autre chose que je peux faire pour vous ? »\n"
+            f"- Si l'appelant dit non ou reste silencieux (5-10 secondes), conclus avec : « Parfait ! Merci d'avoir appelé ! Passez une belle journée ! Au revoir ! »\n"
+            f"- Puis appelle IMMÉDIATEMENT end_call.\n\n"
+
+            f"Quand tu dictes un numéro de téléphone, fais-le TRÈS lentement et de façon naturelle au Québec :\n"
+            f"- Groupe par 3-3-4 : ex. pour (514) 947-4976 → « cinq un quatre... neuf quatre sept... quatre neuf sept six. »\n"
+            f"- Pause naturelle entre chaque groupe.\n"
+            f"- Jamais comme les Européens (ex. éviter « cinq cent quatorze... » ou « cinq mille cent... »).\n\n"
+
+            f"Les bureaux sont ouverts du {company_hours}.\n"
+            f"L'adresse est {company_address}.\n"
+            f"Reste toujours dans ton rôle. Ne mentionne jamais que tu es une IA.\n"
+            f"Si silence prolongé (>20 secondes), conclus poliment et appelle end_call.\n\n"
+
+            f"Quand l'appelant demande l'heure, la date ou le jour, utilise IMMÉDIATEMENT la tool get_current_datetime ou get_current_time.\n"
+            f"Pour infos détaillées sur le site, utilise IMMÉDIATEMENT fetch_company_website.\n\n"
+
+            f"RÉSUMÉ DES RÈGLES ABSOLUES :\n"
+            f"- Une seule question à la fois.\n"
+            f"- Attendre confirmation EXPLICITE avant tout tool.\n"
+            f"- Phrase finale TOUJOURS complète, immédiate et chaleureuse.\n"
+            f"- Ton ultra-chaleureux, québécois poli (jamais trop familier).\n"
+        )
 
         # numéro de l'appelant est connue
         if caller_number:
@@ -157,8 +171,10 @@ class Assistant(Agent):
             f"Ensuite, résume les infos de façon naturelle, concise et chaleureuse à l'appelant.\n"
         )
 
+        # ajour pour tool get_current_time et get_current_datetime
         base_instructions += (
-            f"\nQuand l'appelant demande l'heure actuelle, utilise IMMÉDIATEMENT la tool get_current_time pour obtenir l'heure exacte à Montréal et réponds poliment avec cette information."
+            f"Quand l'appelant demande l'heure actuelle, utilise IMMÉDIATEMENT la tool get_current_time pour obtenir l'heure exacte à Montréal et réponds poliment avec cette information.\n"
+            f"Quand l'appelant demande la date, le jour de la semaine ou l'heure, utilise IMMÉDIATEMENT la tool get_current_datetime (ou get_current_time pour l'heure seule) pour répondre précisément.\n"
         )
 
         # LOG DES INSTRUCTIONS COMPLÈTES ENVOYÉES AU MODÈLE
@@ -181,6 +197,7 @@ class Assistant(Agent):
                 take_message,
                 fetch_company_website,
                 get_current_time,
+                get_current_datetime,
             ],
         )
 
@@ -392,6 +409,42 @@ async def get_current_time(ctx: RunContext) -> str:
     # Retourner une phrase naturelle que le LLM pourra utiliser directement
     return f"Il est actuellement {heure_parlee} à Montréal."
 
+@function_tool
+async def get_current_datetime(ctx: RunContext) -> str:
+    """Retourne la date complète et l'heure actuelle à Montréal (Québec), avec le jour de la semaine en français.
+    Utilise cette tool quand l'appelant demande la date, le jour de la semaine, ou « on est quel jour ? », « quelle date on est ? », etc."""
+    
+    await ctx.wait_for_playout()
+    
+    now = datetime.now(TZ_MONTREAL)
+    
+    # Jours de la semaine en français québécois
+    jours_fr = {
+        "Monday": "lundi",
+        "Tuesday": "mardi",
+        "Wednesday": "mercredi",
+        "Thursday": "jeudi",
+        "Friday": "vendredi",
+        "Saturday": "samedi",
+        "Sunday": "dimanche"
+    }
+    
+    # Mois en français
+    mois_fr = {
+        1: "janvier", 2: "février", 3: "mars", 4: "avril",
+        5: "mai", 6: "juin", 7: "juillet", 8: "août",
+        9: "septembre", 10: "octobre", 11: "novembre", 12: "décembre"
+    }
+    
+    jour_semaine = jours_fr[now.strftime("%A")]
+    jour = now.day
+    mois = mois_fr[now.month]
+    annee = now.year
+    heure = now.strftime("%H:%M")
+    
+    # Phrase naturelle et chaleureuse
+    return f"Aujourd'hui, on est {jour_semaine} le {jour} {mois} {annee}, et il est {heure} à Montréal."
+
 server = AgentServer()
 
 
@@ -484,6 +537,9 @@ async def my_agent(ctx: JobContext):
             "Propriétaire : Guillaume Boucher.\n"
             "Région desservie : Kamouraska et environs.\n"
             "Pour plus de détails ou projets en cours, mentionne que nous sommes actifs sur Facebook (ÉlectriZone).\n"
+            "Ajout pour la prise de message pour électrizone: \n"
+            "- Après avoir la raison de l’appel, demande toujours : « Est-ce que c’est pour une installation résidentielle, commerciale ou agricole ? »\n"
+            "- Attends la réponse avant de continuer vers le numéro/nom/récap.\n"
         ) 
     else:
         room_prefix = "Inconnue"
@@ -593,6 +649,10 @@ async def my_agent(ctx: JobContext):
         ),
     )
 
+    # Join the room and connect to the user
+    await ctx.connect()
+
+
     # ENSUITE, stocke la room directement dans l'instance assistant
     assistant.room = ctx.room
     logger.info("Room stockée dans l'instance Assistant pour le tool hangup")
@@ -638,8 +698,6 @@ async def my_agent(ctx: JobContext):
     #     allow_interruptions=False
     # )
 
-    # Join the room and connect to the user
-    await ctx.connect()
 
 
 if __name__ == "__main__":
