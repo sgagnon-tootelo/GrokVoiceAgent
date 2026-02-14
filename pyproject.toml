@@ -17,6 +17,7 @@ dependencies = [
     "lxml>=6.0.2",
     "python-dotenv",
     "twilio>=9.10.1",
+    "tzdata>=2025.3",
 ]
 
 [dependency-groups]

@@ -30,6 +30,11 @@ from livekit.plugins import deepgram
 #from livekit.agents import Worker, WorkerOptions
 
 from typing import Optional
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+# Fuseau horaire du Québec
+TZ_MONTREAL = ZoneInfo("America/Montreal")
 
 # Force le niveau global (ajoute ça tôt dans agent.py)
 logging.getLogger("livekit.agents").setLevel(logging.DEBUG)      # ou WARNING, ERROR, etc.
@@ -152,6 +157,10 @@ class Assistant(Agent):
             f"Ensuite, résume les infos de façon naturelle, concise et chaleureuse à l'appelant.\n"
         )
 
+        base_instructions += (
+            f"\nQuand l'appelant demande l'heure actuelle, utilise IMMÉDIATEMENT la tool get_current_time pour obtenir l'heure exacte à Montréal et réponds poliment avec cette information."
+        )
+
         # LOG DES INSTRUCTIONS COMPLÈTES ENVOYÉES AU MODÈLE
         logger.info("=== INSTRUCTIONS SYSTÈME ENVOYÉES À GROK ===")
         logger.info(base_instructions)
@@ -171,6 +180,7 @@ class Assistant(Agent):
                 end_call,
                 take_message,
                 fetch_company_website,
+                get_current_time,
             ],
         )
 
@@ -265,7 +275,7 @@ async def take_message(ctx: RunContext, name: str, callback_number: Optional[str
             f"📞 Appelant : {format_phone(caller_number)}\n"
             f"🔄 Rappel au : {format_phone(final_callback)}\n"
             f"💬 Message : {reason}\n\n"
-            f"Heure : {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            f"Heure : {datetime.now(TZ_MONTREAL).strftime('%Y-%m-%d %H:%M')}"
         )        
         message = client.messages.create(
             to=admin_phone,
@@ -367,6 +377,20 @@ async def fetch_company_website(ctx: RunContext, section: str = "accueil", query
     except Exception as e:
         logger.error(f"Erreur fetch site {company} : {e}")
         return "Désolé, je n'arrive pas à accéder au site pour le moment. Je peux répondre avec les informations générales que je connais."
+
+@function_tool
+async def get_current_time(ctx: RunContext) -> str:
+    """Retourne l'heure actuelle à Montréal (Québec). 
+    Utilise cette tool quand l'appelant demande l'heure actuelle ou « quelle heure il est ? »."""
+    
+    await ctx.wait_for_playout()  # Optionnel mais recommandé : attend que l'agent ait fini de parler avant d'exécuter
+    
+    now = datetime.now(TZ_MONTREAL)
+    heure = now.strftime("%H:%M")          # Format 14:30
+    heure_parlee = now.strftime("%H heure %M")  # Pour prononciation naturelle
+    
+    # Retourner une phrase naturelle que le LLM pourra utiliser directement
+    return f"Il est actuellement {heure_parlee} à Montréal."
 
 server = AgentServer()
 
