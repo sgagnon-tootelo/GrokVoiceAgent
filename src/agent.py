@@ -54,6 +54,43 @@ def format_phone(number: str) -> str:
         return f"({number[1:4]}) {number[4:7]}-{number[7:]}"
     return number
 
+def spoken_phone(raw_number: str) -> str:
+    """
+    Convertit un numéro de téléphone en version phonétique québécoise lente,
+    groupe par 3-3-4, avec tous les chiffres prononcés séparément.
+    Exemple : "4508080813" → "quatre cinq zéro... huit zéro huit... zéro huit treize"
+    """
+    # Nettoie : ne garde que les chiffres, enlève +1 si présent
+    number = ''.join(filter(str.isdigit, raw_number))
+    if number.startswith('1') and len(number) == 11:
+        number = number[1:]
+    
+    if len(number) != 10:
+        return "numéro inconnu"  # fallback safe
+    
+    digits_map = {
+        '0': 'zéro',
+        '1': 'un',
+        '2': 'deux',
+        '3': 'trois',
+        '4': 'quatre',
+        '5': 'cinq',
+        '6': 'six',
+        '7': 'sept',
+        '8': 'huit',   # le "t" est dans l'orthographe normale → la voix ara le prononce généralement bien
+        '9': 'neuf'
+    }
+    
+    def speak_group(group: str) -> str:
+        return ' '.join(digits_map[d] for d in group)
+    
+    area_code = speak_group(number[:3])
+    exchange = speak_group(number[3:6])
+    subscriber = speak_group(number[6:10])  # 4 chiffres, tous séparés
+    
+    # Les "..." indiquent des pauses naturelles (le modèle les respecte bien)
+    return f"{area_code}... {exchange}... {subscriber}"
+
 # Charge les vars personnalisées depuis le .env (avec fallback Telnek pour tes tests)
 agent_name = os.getenv("AGENT_NAME", "Amélie")
 
@@ -61,12 +98,16 @@ class Assistant(Agent):
     def __init__(
             self, 
             caller_number: Optional[str] = None,
+            formatted_caller: Optional[str] = None,
+            spoken_caller: Optional[str] = None,
             company_name: str = "Telnek",
             company_address: str = "",
             company_hours: str = "",
             admin_phone: str = "",
             instructions_specific: str = ""
             ) -> None:
+        self.formatted_caller = formatted_caller or "inconnue"
+        self.spoken_caller = spoken_caller or "inconnue"
         self.room: rtc.Room | None = None
         self.admin_phone = admin_phone
 
@@ -118,8 +159,14 @@ class Assistant(Agent):
             f"- Si l'appelant dit non ou reste silencieux (5-10 secondes), conclus avec : « Merci d'avoir appelé ! Passez une belle journée ! Au revoir ! »\n"
             f"- Puis appelle IMMÉDIATEMENT end_call.\n\n"
 
-            f"Quand tu dictes un numéro de téléphone, fais-le TRÈS lentement et de façon naturelle au Québec :\n"
+            f"Quand tu dois dire un numéro de téléphone, utilise TOUJOURS ce format précis et prononce-le lentement, groupe par groupe, à la québécoise :\n"
             f"- Groupe par 3-3-4 : ex. pour (514) 947-4976 → « cinq un quatre... neuf quatre sept... quatre neuf sept six. »\n"
+            f"- Exemple pour (450) 808-0813 : « quatre cinq zéro... huit zéro huit... zéro huit un trois. »\n"
+            f"- Prononce toujours le 't' final de 'huit' clairement : « huit » (pas « hui »).\n"
+            f"- Pour 'quatre' dis « quatre », pour 'cinq' dis « cinq », etc. Jamais de style européen comme « quatre-vingt ».\n"
+            f"- Pause naturelle d’environ 1 seconde entre chaque groupe de chiffres.\n"
+            f"- Ne dis jamais le numéro en continu ou en format international (+1…). Utilise toujours ce format phonétique québécois.\n"
+ 
             f"- Pause naturelle entre chaque groupe.\n\n"
 
             f"Nos bureaux sont ouverts du {company_hours}.\n"
@@ -140,7 +187,10 @@ class Assistant(Agent):
         # numéro de l'appelant est connue
         if caller_number:
             base_instructions += (
-                f"Information importante : l'appelant utilise actuellement le numéro de téléphone {caller_number}. Proposez-lui d'utiliser ce numéro (en le confirmant avec lui) s'il désire être rappelé ou s'il souhaite laisser un message.\n"
+                f"Information importante : l'appelant utilise actuellement le numéro de téléphone {caller_number}.\n"
+                f"Propose d'abord d'utiliser le numéro actuel pour le rappel avec CETTE phrase EXACTE :\n"
+                f"« Je peux utiliser le numéro d'où vous appelez, qui est le {self.spoken_caller}, ou préférez-vous m'en donner un autre ? »\n"
+                f"Prononce lentement, avec des pauses naturelles après chaque groupe de chiffres.\n\n"
             )
 
         # ajour des instructions spécific pour cette compagnie
@@ -572,23 +622,28 @@ async def my_agent(ctx: JobContext):
         else:
             logger.warning("Aucun numéro d'appelant détecté (ni participant SIP, ni dans le nom de room)")
 
-    # === NORMALISATION ET FORMATAGE DU NUMÉRO ===
+    # === NORMALISATION ET FORMATAGE DU NUMÉRO === (ton bloc existant)
     if caller_number:
         original = caller_number
         
-        # 1. Enlever le +1 s'il est présent (format international NANP)
         if caller_number.startswith("+1") and len(caller_number) >= 11:
             caller_number = caller_number.lstrip("+1")
-            logger.info(f"Code pays +1 retiré : {original} → {caller_number}")
         
-        # 2. Formater en (XXX) XXX-XXXX si on a exactement 10 chiffres
-        if len(caller_number) == 10 and caller_number.isdigit():
-            formatted = f"({caller_number[:3]}) {caller_number[3:6]}-{caller_number[6:]}"
-            logger.info(f"Numéro formaté : {caller_number} → {formatted}")
-            caller_number = formatted
-        else:
-            logger.info(f"Numéro non formatable (pas 10 chiffres) : {caller_number} (laissé tel quel)")
-
+        clean_digits = ''.join(filter(str.isdigit, original))
+        if clean_digits.startswith('1') and len(clean_digits) == 11:
+            clean_digits = clean_digits[1:]
+        
+        # Format visuel pour SMS et logs
+        formatted_caller = format_phone(clean_digits)
+        
+        # Version parlée phonétique (notre nouvelle fonction)
+        spoken_caller = spoken_phone(clean_digits)
+        
+        logger.info(f"Numéro appelant → formaté: {formatted_caller} | parlé: {spoken_caller}")
+    else:
+        formatted_caller = "inconnu"
+        spoken_caller = "inconnu"
+        clean_digits = ""
 
     # To use a realtime model instead of a voice pipeline, use the following session setup instead.
     # (Note: This is for the OpenAI Realtime API. For other providers, see https://docs.livekit.io/agents/models/realtime/))
@@ -612,6 +667,8 @@ async def my_agent(ctx: JobContext):
     # Crée l'instance Assistant D'ABORD
     assistant = Assistant(
         caller_number=caller_number,
+        formatted_caller=formatted_caller,
+        spoken_caller=spoken_caller,
         company_name=company_name,
         company_address=company_address,
         company_hours=company_hours,
