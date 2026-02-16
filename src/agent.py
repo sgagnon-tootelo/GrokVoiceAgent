@@ -563,12 +563,13 @@ async def my_agent(ctx: JobContext):
         )    
     elif ctx.room.name.startswith("electrizone-"):
         room_prefix = "electrizone-"
-        company_name = "électri-zone"
+        company_name = "ÉlectriZone"
         company_address = "deux milles dix, rue Alphonse, à Saint-Pascal, Québec. G0L 3Y0"
         company_hours = "lundi au vendredi de 8 heure à 17 heure"
         admin_phone = "+15149474976"
         callee_number = "+14388141491"
         instructions_specific = (
+            "Le nom de l’entreprise est « ÉlectriZone », prononcé « Élec-tri » légère pause puis « Zone » (accent sur Zone). Jamais « Électric Zone » ou « Électrique Zone ».\n"
             "ÉlectriZone se spécialise dans les services électriques résidentiel, commercial et agricole.\n"
             "Propriétaire : Guillaume Boucher.\n"
             "Région desservie : Kamouraska et environs.\n"
@@ -723,9 +724,10 @@ async def my_agent(ctx: JobContext):
     welcome_message = f"Bonjour, vous êtes bien chez {company_name}, mon nom est {agent_name}. Comment puis-je vous aider aujourd’hui ?"
 
     greeting_instructions = (
-        f"Dis EXACTEMENT ceci comme première phrase, sans rien ajouter, sans rien modifier et sans poser d'autre question : "
-        f"« {welcome_message} » "
-        f"Parle calmement, chaleureusement et avec un sourire naturel."
+        f"Dis EXACTEMENT ceci comme première phrase, sans rien ajouter, sans rien modifier et sans poser d'autre question :\n"
+        f"« {welcome_message} » \n"
+        f"si le nom de l’entreprise est « ÉlectriZone », prononce comme « Élec-tri » légère pause puis « Zone » (accent sur Zone).\n"
+        f"Parle calmement, chaleureusement et avec un sourire naturel.\n"
     )
 
     logger.info(f"Message de bienvenue forcé : {welcome_message}")
